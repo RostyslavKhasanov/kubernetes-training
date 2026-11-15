@@ -12,6 +12,9 @@ echo "📦 Loading Docker images into Minikube..."
 minikube image load resources-image
 minikube image load songs-image
 
+echo "📦 Define namespace..."
+kubectl apply -f k8s/namespace.yml
+
 echo "📦 Adding manual StorageClass..."
 kubectl apply -f k8s/manual-storageclass.yaml
 
