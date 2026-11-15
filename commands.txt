@@ -1,8 +1,20 @@
+### start minikube
+minikube start --driver=docker
+
+### run the deployment script
+. ./deploy.sh
+
 ### open connection to the service
 minikube service resources-service --url -n k8s-program
 
-### forward port to the service (localhost to container)
+### forward port to the resources service (localhost to container)
 kubectl port-forward -n k8s-program svc/resources-service 8080:8080
+
+### forward port to the song service (localhost to container)
+kubectl port-forward -n k8s-program svc/songs-service 8081:8081
+
+### forward port to the db (localhost to container)
+kubectl port-forward -n k8s-program svc/songs-db 5432:5432
 
 ### Create a file inside the mounted volume:
 kubectl exec -n k8s-program <songs-pod-name> -- sh -c 'echo "keep-me" > /data/persist-test.txt'
@@ -18,3 +30,15 @@ kubectl get pods -n=k8s-program -o wide
 
 ### Get all
 kubectl get all -n=k8s-program
+
+### get configmaps
+get configmaps -n=k8s-program
+
+### get secrets
+get secrets -n=k8s-program
+
+### describe pod
+kubectl describe pod -n=k8s-program <pod-name>
+
+### check pod logs
+kubectl logs -n=k8s-program <pod-name>

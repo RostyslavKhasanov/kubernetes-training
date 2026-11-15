@@ -1,7 +1,55 @@
 apiVersion: v1
-kind: Namespace
+kind: Secret
 metadata:
-  name: k8s-program
+  name: db-credentials
+  namespace: k8s-program
+type: Opaque
+stringData:
+  username: postgres
+  password: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: k8s-program
+data:
+  RESOURCES_MS_NAME: "resources-ms"
+  RESOURCES_MS_PORT: "8080"
+  SONGS_MS_URL: "songs-service"
+  SONGS_MS_PORT: "8081"
+  EUREKA_URI: "eureka-server"
+  ENABLE_EUREKA_CLIENT: "true"
+  RESOURCES_DB_URL: "resources-db"
+  RESOURCES_DB_PORT: "5432"
+  SONGS_MS_NAME: "songs-ms"
+  SONGS_DB_URL: "songs-db"
+  SONGS_DB_PORT: "5432"
+  SPRING_DATASOURCE_URL_RESOURCES: "jdbc:postgresql://resources-db:5432/resources"
+  SPRING_DATASOURCE_URL_SONGS: "jdbc:postgresql://songs-db:5432/songs"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-scripts
+  namespace: k8s-program
+data:
+  init-resources.sql: |
+    CREATE TABLE IF NOT EXISTS resources (
+        id SERIAL PRIMARY KEY,
+        blob BYTEA
+    );
+  init-songs.sql: |
+    CREATE TABLE IF NOT EXISTS songs (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        artist VARCHAR(255),
+        album VARCHAR(255),
+        length VARCHAR(255),
+        resource_id INTEGER UNIQUE NOT NULL,
+        year VARCHAR(255),
+        genre VARCHAR(255)
+    );
 ---
 apiVersion: v1
 kind: Service
@@ -68,6 +116,11 @@ metadata:
   namespace: k8s-program
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: resources-service
@@ -82,33 +135,55 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8080
+          livenessProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          startupProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+          envFrom:
+            - configMapRef:
+                name: app-config
           env:
-            - name: RESOURCES_MS_NAME
-              value: resources-ms
-            - name: RESOURCES_MS_PORT
-              value: "8080"
-            - name: SONGS_MS_URL
-              value: songs-service
-            - name: SONGS_MS_PORT
-              value: "8081"
-            - name: EUREKA_URI
-              value: eureka-server
-            - name: ENABLE_EUREKA_CLIENT
-              value: "true"
-            - name: RESOURCES_DB_URL
-              value: resources-db
-            - name: RESOURCES_DB_PORT
-              value: "5432"
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: SPRING_DATASOURCE_URL_RESOURCES
             - name: SPRING_DATASOURCE_USERNAME
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
       initContainers:
         - name: wait-for-resources-db
           image: postgres:16
           env:
             - name: PGPASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
           command:
             - sh
             - -c
@@ -125,6 +200,11 @@ metadata:
   namespace: k8s-program
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: songs-service
@@ -139,23 +219,46 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8081
+          livenessProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          startupProbe:
+            timeoutSeconds: 10
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            failureThreshold: 30
+            periodSeconds: 10
+          envFrom:
+            - configMapRef:
+                name: app-config
           env:
-            - name: SONGS_MS_NAME
-              value: songs-ms
-            - name: SONGS_MS_PORT
-              value: "8081"
-            - name: EUREKA_URI
-              value: eureka-server
-            - name: ENABLE_EUREKA_CLIENT
-              value: "true"
-            - name: SONGS_DB_URL
-              value: songs-db
-            - name: SONGS_DB_PORT
-              value: "5432"
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: SPRING_DATASOURCE_URL_SONGS
             - name: SPRING_DATASOURCE_USERNAME
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
           volumeMounts:
             - name: songs-storage
               mountPath: /data
@@ -164,7 +267,10 @@ spec:
           image: postgres:16
           env:
             - name: PGPASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
           command:
             - sh
             - -c
@@ -199,16 +305,60 @@ spec:
           image: postgres:16
           ports:
             - containerPort: 5432
+          livenessProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            failureThreshold: 30
+            periodSeconds: 10
           env:
             - name: POSTGRES_DB
               value: resources
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_USER
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
             - name: POSTGRES_PASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: db-init-scripts
+            items:
+              - key: init-resources.sql
+                path: init-resources.sql
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
@@ -241,16 +391,60 @@ spec:
           image: postgres:16
           ports:
             - containerPort: 5432
+          livenessProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          startupProbe:
+            timeoutSeconds: 10
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+            failureThreshold: 30
+            periodSeconds: 10
           env:
             - name: POSTGRES_DB
               value: songs
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_USER
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
             - name: POSTGRES_PASSWORD
-              value: postgres
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: db-init-scripts
+            items:
+              - key: init-songs.sql
+                path: init-songs.sql
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
