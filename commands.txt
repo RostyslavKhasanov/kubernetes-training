@@ -1,0 +1,20 @@
+### open connection to the service
+minikube service resources-service --url -n k8s-program
+
+### forward port to the service (localhost to container)
+kubectl port-forward -n k8s-program svc/resources-service 8080:8080
+
+### Create a file inside the mounted volume:
+kubectl exec -n k8s-program <songs-pod-name> -- sh -c 'echo "keep-me" > /data/persist-test.txt'
+
+### Verify file exists
+kubectl exec -n k8s-program <songs-pod-name> -- sh -c 'cat /data/persist-test.txt'
+
+### Delete the pod so ReplicaSet recreates it
+kubectl delete pod -n k8s-program <songs-pod-name>
+
+### Get pods
+kubectl get pods -n=k8s-program -o wide
+
+### Get all
+kubectl get all -n=k8s-program
